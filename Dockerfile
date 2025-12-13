@@ -14,8 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Копируем весь проект
 COPY . .
 
-# Создаем директории для данных и моделей
+# Создаем директории
 RUN mkdir -p data models
 
-# Команда по умолчанию
-CMD ["python", "train.py"]
+# Открываем порт для API
+EXPOSE 5000
+
+# Команда запуска API
+CMD ["python", "service.py"]
