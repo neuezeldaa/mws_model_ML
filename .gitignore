@@ -4,7 +4,6 @@ venv/
 catboost_info/
 
 # данные и артефакты моделей
-*.csv
 *.cbm
 *.joblib
 
