@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  data-prepare:
+    build: .
+    container_name: mws_data_prepare
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    command: python data_prepare.py
+
+  train:
+    build: .
+    container_name: mws_train
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    command: python train.py
+    depends_on:
+      - data-prepare
+
+  test:
+    build: .
+    container_name: mws_test
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    command: python test.py
+    depends_on:
+      - train

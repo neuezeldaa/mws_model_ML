@@ -6,6 +6,9 @@ catboost_info/
 # данные и артефакты моделей
 *.cbm
 *.joblib
+data/gitleaks_detection_dataset.csv
+data/gitleaks_test_100.csv
+data/gitleaks_test_100_results.csv
 
 # IDE / служебные файлы
 .idea/
