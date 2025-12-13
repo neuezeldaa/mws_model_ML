@@ -12,10 +12,10 @@ from catboost import CatBoostClassifier
 
 print("Загрузка подготовленных данных...")
 
-X = pd.read_csv('gitleaks_dataset_sklearn_X.csv')
-y = pd.read_csv('gitleaks_dataset_y.csv').iloc[:, 0]
+X = pd.read_csv('data/gitleaks_dataset_sklearn_X.csv')
+y = pd.read_csv('data/gitleaks_dataset_y.csv').iloc[:, 0]
 
-X_cb = pd.read_csv('gitleaks_dataset_catboost_X.csv')
+X_cb = pd.read_csv('data/gitleaks_dataset_catboost_X.csv')
 
 numeric_features = [
     'secret_length',
@@ -151,8 +151,8 @@ print(f"GradientBoosting: {f1_gb:.4f}")
 print(f"CatBoost:         {f1_cb:.4f}")
 
 # Сохранение лучших моделей/скейлера
-joblib.dump(gb, 'model_gb.pkl')
-joblib.dump(scaler, 'scaler.pkl')
-cb.save_model('model_cb.cbm')
+joblib.dump(gb, 'models/model_gb.pkl')
+joblib.dump(scaler, 'models/scaler.pkl')
+cb.save_model('models/model_cb.cbm')
 
 print("\nМодели сохранены.")

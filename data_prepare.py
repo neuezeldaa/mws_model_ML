@@ -145,7 +145,7 @@ for col in categorical_features:
     X[col] = le.fit_transform(X[col].astype(str))
     le_dict[col] = le
 
-joblib.dump(le_dict, 'le_dict.pkl')
+joblib.dump(le_dict, 'models/le_dict.pkl')
 
 all_features = numeric_features + categorical_features
 X_sklearn = X[all_features]
