@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
-import joblib
-
+import math
+from catboost import CatBoostClassifier, Pool
 
 # 1. Загружаем тестовый датасет
 df = pd.read_csv("gitleaks_test_100.csv")
@@ -9,22 +9,96 @@ df = pd.read_csv("gitleaks_test_100.csv")
 # 2. Целевая переменная
 y_true = (df["IsRealLeak"] == True).astype(int) if df["IsRealLeak"].dtype != int else df["IsRealLeak"]
 
-# 3. Создаём признаки (как при обучении)
+# ================== ОБРАБОТКА ДАННЫХ ==================
 
-# secret_length
+# Базовые признаки
 df["secret_length"] = df["Secret"].str.len()
 
-# secret_special_chars
-special_chars = "!@#$%^&*()-_=+[]{}|;:',.<>?/~`"
-df["secret_special_chars"] = df["Secret"].apply(
-    lambda x: sum(1 for c in str(x) if c in special_chars)
-)
+SPECIAL = "!@#$%^&*()-_=+[]{}|;:',.<>?/~`"
+def count_special_chars(text):
+    return sum(1 for c in str(text) if c in SPECIAL)
 
-# secret_has_url
+df["secret_special_chars"] = df["Secret"].apply(count_special_chars)
 df["secret_has_url"] = df["Secret"].str.contains("http", case=False, na=False).astype(int)
-
-# file_extension
 df["file_extension"] = df["File"].str.split(".").str[-1]
+
+# Энтропия
+def shannon_entropy(text: str) -> float:
+    s = str(text)
+    if not s:
+        return 0.0
+    from collections import Counter
+    counts = Counter(s)
+    total = len(s)
+    ent = 0.0
+    for c in counts.values():
+        p = c / total
+        ent -= p * math.log2(p)
+    return ent
+
+df["secret_entropy"] = df["Secret"].apply(shannon_entropy)
+
+# Доли типов символов
+def char_stats(text: str):
+    s = str(text)
+    if not s:
+        return 0, 0, 0, 0
+    letters = sum(c.isalpha() for c in s)
+    digits = sum(c.isdigit() for c in s)
+    uppers = sum(c.isupper() for c in s)
+    specials = sum(c in SPECIAL for c in s)
+    n = len(s)
+    return (
+        letters / n,
+        digits / n,
+        uppers / n,
+        specials / n,
+    )
+
+stats = df["Secret"].apply(char_stats)
+df["secret_letter_ratio"] = stats.apply(lambda t: t[0])
+df["secret_digit_ratio"] = stats.apply(lambda t: t[1])
+df["secret_upper_ratio"] = stats.apply(lambda t: t[2])
+df["secret_special_ratio"] = stats.apply(lambda t: t[3])
+
+# Base64‑подобность
+BASE64_ALPH = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+def base64_ratio(text: str) -> float:
+    s = str(text)
+    if not s:
+        return 0.0
+    cnt = sum(c in BASE64_ALPH for c in s)
+    return cnt / len(s)
+
+df["secret_base64_ratio"] = df["Secret"].apply(base64_ratio)
+
+# Префиксы
+def secret_prefix_flags(text: str):
+    s = str(text)
+    s_lower = s.lower()
+    return {
+        "has_prefix_aws_akid": int(s.startswith("AKIA") or s.startswith("ASIA")),
+        "has_prefix_github":   int(s.startswith("ghp_") or s.startswith("gho_") or s.startswith("ghs_")),
+        "has_prefix_slack":    int(s_lower.startswith("xoxb-") or s_lower.startswith("xoxp-")),
+    }
+
+pref_df = df["Secret"].apply(secret_prefix_flags).apply(pd.Series)
+df = pd.concat([df, pref_df], axis=1)
+
+# Контекст (RuleID + File)
+def context_flags(row):
+    ctx = f"{row.get('RuleID', '')} {row.get('File', '')}"
+    ctx = str(ctx).lower()
+    return {
+        "ctx_has_pass":    int(any(k in ctx for k in ["pass", "pwd"])),
+        "ctx_has_token":   int("token" in ctx),
+        "ctx_has_key":     int("key" in ctx),
+        "ctx_has_secret":  int("secret" in ctx),
+        "ctx_has_example": int("example" in ctx or "sample" in ctx or "test" in ctx),
+    }
+
+ctx_df = df.apply(context_flags, axis=1, result_type="expand")
+df = pd.concat([df, ctx_df], axis=1)
 
 numeric_features = [
     "secret_length",
@@ -34,50 +108,58 @@ numeric_features = [
     "EndLine",
     "StartColumn",
     "EndColumn",
+    "secret_entropy",
+    "secret_letter_ratio",
+    "secret_digit_ratio",
+    "secret_upper_ratio",
+    "secret_special_ratio",
+    "secret_base64_ratio",
+    "has_prefix_aws_akid",
+    "has_prefix_github",
+    "has_prefix_slack",
+    "ctx_has_pass",
+    "ctx_has_token",
+    "ctx_has_key",
+    "ctx_has_secret",
+    "ctx_has_example",
 ]
 categorical_features = ["RuleID", "file_extension"]
-
-# 4. Загружаем энкодеры, скейлер, модель
-le_dict = joblib.load("le_dict.pkl")
-scaler = joblib.load("scaler.pkl")
-model = joblib.load("model_gb.pkl")
-
-# 5. Кодируем категориальные признаки
-for col in categorical_features:
-    le = le_dict[col]
-    # значения, которых не было при обучении, отправляем в первый класс
-    mask_unknown = ~df[col].astype(str).isin(le.classes_)
-    if mask_unknown.any():
-        df.loc[mask_unknown, col] = le.classes_[0]
-    df[col] = le.transform(df[col].astype(str))
-
-# 6. Собираем матрицу признаков в правильном порядке
 all_features = numeric_features + categorical_features
-X = df[all_features]
 
-# 7. Масштабируем
-X_scaled = scaler.transform(X)
 
-# 8. Предсказания и уверенность
-y_pred = model.predict(X_scaled)              # 0/1
-y_proba = model.predict_proba(X_scaled)       # [:,1] — P(RealLeak)
+# ================== МОДЕЛЬ CatBoost ==================
 
-proba_real = y_proba[:, 1]
-confidence = np.maximum(proba_real, 1 - proba_real) * 100.0
+cb_model = CatBoostClassifier()
+cb_model.load_model("model_cb.cbm")
 
-# 9. Формируем результаты
+X_cb = df[all_features]
+
+cat_features_idx = [
+    X_cb.columns.get_loc("RuleID"),
+    X_cb.columns.get_loc("file_extension"),
+]
+
+cb_pool = Pool(X_cb, cat_features=cat_features_idx)
+
+y_pred_cb = cb_model.predict(cb_pool)
+y_proba_cb = cb_model.predict_proba(cb_pool)[:, 1]
+conf_cb = np.maximum(y_proba_cb, 1 - y_proba_cb) * 100.0
+
+# CatBoost возвращает (n,1) или строки, приведём к int
+y_pred_cb = np.array(y_pred_cb).astype(int).ravel()
+
+# ================== СОХРАНЕНИЕ РЕЗУЛЬТАТОВ ==================
+
 results = pd.DataFrame({
     "Secret": df["Secret"],
     "RuleID": df["RuleID"],
     "File": df["File"],
     "IsRealLeak_true": y_true,
-    "PredictedIsRealLeak": y_pred,
-    "IsRealLeak_bool": y_pred.astype(bool),
-    "Prob_FalsePositive": (1 - proba_real) * 100.0,
-    "Prob_RealLeak": proba_real * 100.0,
-    "Confidence": confidence,
+    "CB_PredictedIsRealLeak": y_pred_cb,
+    "CB_Prob_RealLeak": y_proba_cb * 100.0,
+    "CB_Prob_FalsePositive": (1 - y_proba_cb) * 100.0,
+    "CB_Confidence": conf_cb,
 })
 
-# 10. Сохраняем
 results.to_csv("gitleaks_test_100_results.csv", index=False)
 print("Результаты сохранены в gitleaks_test_100_results.csv")

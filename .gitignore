@@ -1,0 +1,16 @@
+# виртуальное окружение
+.venv/
+venv/
+catboost_info/
+
+# datasets и артефакты моделей (если не хочешь хранить их в репо)
+*.csv
+*.cbm
+*.pkl
+*.joblib
+
+# IDE / служебные файлы
+.idea/
+.vscode/
+__pycache__/
+*.pyc
