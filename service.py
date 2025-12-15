@@ -3,7 +3,6 @@ import pandas as pd
 import joblib
 import math
 from catboost import CatBoostClassifier
-import io
 
 app = Flask(__name__)
 
@@ -19,34 +18,21 @@ SPECIAL = "!@#$%^&*()-_=+[]{}|;:',.<>?/~`"
 BASE64_ALPH = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
 
 
-def extract_features_from_sarif(sarif_json):
-    """Извлекает признаки из SARIF JSON формата Gitleaks"""
+def extract_features_from_json(json_data):
+    """Извлекает признаки из упрощенного JSON формата"""
     results = []
 
-    for run in sarif_json.get('runs', []):
-        for result in run.get('results', []):
-            # Извлекаем данные
-            rule_id = result.get('ruleId', 'unknown')
-            location = result['locations'][0]['physicalLocation']
-            region = location['region']
-            props = result.get('properties', {})
-
-            # Получаем secret из fingerprint или создаем mock
-            secret = props.get('fingerprint', 'unknown_secret')
-
-            # Извлекаем путь к файлу
-            file_path = location['artifactLocation']['uri']
-
-            row = {
-                'RuleID': rule_id,
-                'Secret': secret,
-                'File': file_path,
-                'StartLine': region.get('startLine', 0),
-                'EndLine': region.get('endLine', 0),
-                'StartColumn': region.get('startColumn', 0),
-                'EndColumn': region.get('endColumn', 0),
-            }
-            results.append(row)
+    for item in json_data:
+        row = {
+            'RuleID': item.get('rule_id', 'unknown'),
+            'Secret': item.get('value', 'unknown_secret'),
+            'File': item.get('file_path', 'unknown'),
+            'StartLine': item.get('line', 0),
+            'EndLine': item.get('line', 0),
+            'StartColumn': 0,
+            'EndColumn': len(str(item.get('value', ''))),
+        }
+        results.append(row)
 
     return pd.DataFrame(results)
 
@@ -175,31 +161,37 @@ def prepare_for_prediction(df):
     ]
 
     categorical_features = ['RuleID', 'file_extension']
-
-    # Все признаки в правильном порядке
     all_features = numeric_features + categorical_features
 
     return df[all_features]
 
 
-
 @app.route('/predict', methods=['POST'])
 def predict():
     """
-    Принимает SARIF JSON от Gitleaks и возвращает предсказания
+    Принимает JSON массив секретов и возвращает предсказания
     """
     try:
         # Получаем JSON
-        sarif_data = request.get_json()
+        json_data = request.get_json()
 
-        if not sarif_data:
+        if not json_data:
             return jsonify({'error': 'No JSON data provided'}), 400
 
-        # Извлекаем признаки из SARIF
-        df = extract_features_from_sarif(sarif_data)
+        if not isinstance(json_data, list):
+            return jsonify({'error': 'Expected JSON array'}), 400
+
+        # Извлекаем признаки из JSON
+        df = extract_features_from_json(json_data)
 
         if df.empty:
-            return jsonify({'error': 'No results found in SARIF data'}), 400
+            return jsonify({'error': 'No results found in JSON data'}), 400
+
+        # Сохраняем исходные данные для ответа
+        original_data = df[['RuleID', 'Secret', 'File']].copy()
+
+        # Сохраняем ID из входных данных
+        ids = [item.get('id') for item in json_data]
 
         # Feature engineering
         df = engineer_features(df)
@@ -207,29 +199,33 @@ def predict():
         # Подготовка для предсказания
         X = prepare_for_prediction(df)
 
-        # Предсказание (используем CatBoost как основную модель)
+        # Предсказание
         predictions = model_cb.predict(X)
         probabilities = model_cb.predict_proba(X)[:, 1]
 
-        # Формирование ответа - ИСПРАВЛЕНО
+
+
+        # Формирование ответа
         results = []
         for idx, (pred, prob) in enumerate(zip(predictions, probabilities)):
-            results.append({
-                'index': int(idx),  # Конвертируем в int
-                'is_real_leak': bool(int(pred)),  # Конвертируем в bool
-                'confidence': float(prob),  # Конвертируем в float
-                'rule_id': str(df.iloc[idx]['RuleID']),  # Конвертируем в str
-                'file': str(df.iloc[idx]['File'])  # Конвертируем в str
-            })
+            mlconf = float(prob)
+            if bool(int(pred)) == False:
+                mlconf = 1 - float(prob)
+
+            result = {
+                'id': ids[idx],
+                'MLPredict': bool(int(pred)),
+                'MLConfidence': mlconf
+            }
+            results.append(result)
 
         return jsonify({
-            'predictions': results,
-            'total_analyzed': int(len(results)),  # Конвертируем в int
-            'real_leaks_detected': int(sum(predictions))  # Конвертируем в int
+            'results': results,
         })
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

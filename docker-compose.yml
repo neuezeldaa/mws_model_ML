@@ -1,6 +1,15 @@
 version: '3.8'
 
 services:
+  api:
+    build: .
+    container_name: mws_api
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./models:/app/models
+    command: python service.py
+
   data-prepare:
     build: .
     container_name: mws_data_prepare

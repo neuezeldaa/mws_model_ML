@@ -6,7 +6,7 @@ import math
 
 print("Очистка и подготовка данных...")
 
-data = pd.read_csv('gitleaks_detection_dataset.csv')
+data = pd.read_csv('data/gitleaks_detection_dataset.csv')
 
 data_filtered = data.copy()
 data_filtered = data_filtered.drop(columns=['Match', 'Email', 'Date'])
@@ -151,11 +151,11 @@ all_features = numeric_features + categorical_features
 X_sklearn = X[all_features]
 
 # Сохраняем датасеты
-X_sklearn.to_csv('gitleaks_dataset_sklearn_X.csv', index=False)
-y.to_csv('gitleaks_dataset_y.csv', index=False)
+X_sklearn.to_csv('data/gitleaks_dataset_sklearn_X.csv', index=False)
+y.to_csv('data/gitleaks_dataset_y.csv', index=False)
 
 X_catboost = data_filtered[all_features]
-X_catboost.to_csv('gitleaks_dataset_catboost_X.csv', index=False)
+X_catboost.to_csv('data/gitleaks_dataset_catboost_X.csv', index=False)
 
 print("Файлы сохранены:")
 print("  gitleaks_dataset_sklearn_X.csv")

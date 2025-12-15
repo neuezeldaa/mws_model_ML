@@ -20,5 +20,5 @@ RUN mkdir -p data models
 # Открываем порт для API
 EXPOSE 5000
 
-# Команда запуска API
+# Команда запуска API (ИЗМЕНЕНО)
 CMD ["python", "service.py"]

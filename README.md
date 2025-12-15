@@ -1,44 +1,36 @@
 # MWS Model ML
 
 Коротко про проект:
-На вход поступает распаршенный json в виде .csv таблицы 
+На вход поступает json вида: 
+```
+[
+  {
+    "id": 1,
+    "rule_id": "aws-access-key",
+    "file_path": "src/example/config.py",
+    "line": 10,
+    "value": "AKIAIOSFODNN7EXAMPLE",
+    "severity": "warning",
+    "scanner_confidence": 0.65
+  },
+  {
+    "id": 2,
+    "rule_id": "private-key",
+    "file_path": "src/keys/prod.pem",
+    "line": 15,
+    "value": "-----BEGIN PRIVATE KEY-----",
+    "severity": "error",
+    "scanner_confidence": 0.92
+  }
+]
+```
 
-Признаки должны быть в правильном порядке:
->RuleID
->
->Commit
->
->File
->
->StartLine
->
->EndLine
->
->StartColumn
->
->EndColumn
->
->Match
->
->Secret
->
->Date
->
->Message
->
->Author
->
->Email
->
->Fingerprint
->
->IsRealLeak
+Запуск сервера происходит таким образом:
 
-!!!Иначе модель работать не будет
+>docker run -p 5000:5000 -v ${PWD}/models:/app/models fpni9255/mws_model_ml
 
 
 
 
 
-На выходе модель отдает .csv файл, содержащий Secret,RuleID,File,IsRealLeak_true,CB_PredictedIsRealLeak,CB_Prob_RealLeak,CB_Prob_FalsePositive,CB_Confidence. 
-Выход еще будет меняться, пока что это было тестово
+На выходе выводится MLPredict и MLConfidence для каждого ID соответственно.  
