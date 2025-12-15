@@ -9,6 +9,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score, roc_auc_score
 import joblib
 from catboost import CatBoostClassifier
+from sklearn.calibration import CalibratedClassifierCV
 
 print("Загрузка подготовленных данных...")
 
@@ -79,12 +80,16 @@ roc_auc_lr = roc_auc_score(y_test, y_proba_lr[:, 1])
 print(f"\nLogReg F1: {f1_lr:.4f}, ROC-AUC: {roc_auc_lr:.4f}")
 
 # ---------- Random Forest ----------
-rf = RandomForestClassifier(
-    n_estimators=100,
-    random_state=42,
-    n_jobs=-1
-)
+print("\n--- Random Forest ---")
+rf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1, max_depth=10)
 rf.fit(X_train, y_train)
+
+# Калибровка
+print("Калибровка вероятностей Random Forest...")
+rf_calibrated = CalibratedClassifierCV(rf, method='isotonic', cv=3)
+rf_calibrated.fit(X_train, y_train)
+
+rf = rf_calibrated
 y_pred_rf_test = rf.predict(X_test)
 y_proba_rf = rf.predict_proba(X_test)
 f1_rf = f1_score(y_test, y_pred_rf_test)
@@ -93,6 +98,7 @@ roc_auc_rf = roc_auc_score(y_test, y_proba_rf[:, 1])
 print(f"\nRandomForest F1: {f1_rf:.4f}, ROC-AUC: {roc_auc_rf:.4f}")
 
 # ---------- Gradient Boosting (sklearn) ----------
+print("\n--- Gradient Boosting ---")
 gb = GradientBoostingClassifier(
     n_estimators=250,
     learning_rate=0.05,
@@ -100,8 +106,17 @@ gb = GradientBoostingClassifier(
     min_samples_split=40,
     min_samples_leaf=20,
     subsample=0.8,
+    random_state=42
 )
 gb.fit(X_train, y_train)
+
+# ДОБАВЬТЕ: Калибровка вероятностей
+print("Калибровка вероятностей Gradient Boosting...")
+gb_calibrated = CalibratedClassifierCV(gb, method='sigmoid', cv=3)
+gb_calibrated.fit(X_train, y_train)
+
+gb = gb_calibrated
+
 y_pred_gb_test = gb.predict(X_test)
 y_proba_gb = gb.predict_proba(X_test)
 f1_gb = f1_score(y_test, y_pred_gb_test)
@@ -116,9 +131,12 @@ n_negative = (y_cb_train == 0).sum()
 n_positive = (y_cb_train == 1).sum()
 
 cb = CatBoostClassifier(
-    iterations=300,
-    learning_rate=0.05,
-    depth=6,
+    iterations=200,
+    learning_rate=0.2521,
+    depth=10,
+    l2_leaf_reg=8.28,
+    random_strength=6.842,
+    min_data_in_leaf=23,
     loss_function='Logloss',
     eval_metric='F1',
     class_weights=[1.0, n_negative / n_positive],
@@ -156,3 +174,56 @@ joblib.dump(scaler, 'models/scaler.pkl')
 cb.save_model('models/model_cb.cbm')
 
 print("\nМодели сохранены.")
+
+
+print("\n=== Создание ансамбля ===")
+
+# Предсказания всех моделей на тестовой выборке
+models_predictions = {
+    'gb': y_proba_gb[:, 1],
+    'cb': y_proba_cb,
+    'rf': y_proba_rf[:, 1],
+}
+
+# Простое взвешенное ансамблирование (можно оптимизировать)
+weights = {
+    'cb': 0.5,    # CatBoost - лучшая модель
+    'gb': 0.3,    # Gradient Boosting
+    'rf': 0.2,    # Random Forest
+}
+
+ensemble_proba = (
+    weights['cb'] * models_predictions['cb'] +
+    weights['gb'] * models_predictions['gb'] +
+    weights['rf'] * models_predictions['rf']
+)
+
+ensemble_pred = (ensemble_proba >= 0.5).astype(int)
+f1_ensemble = f1_score(y_test, ensemble_pred)
+roc_auc_ensemble = roc_auc_score(y_test, ensemble_proba)
+
+print(f"\nEnsemble F1: {f1_ensemble:.4f}, ROC-AUC: {roc_auc_ensemble:.4f}")
+
+# Сравнение результатов
+print("\n=== Итоговое сравнение ===")
+results = {
+    'KNN': f1_knn,
+    'LogReg': f1_lr,
+    'RandomForest': f1_rf,
+    'GradientBoosting': f1_gb,
+    'CatBoost': f1_cb,
+    'Ensemble': f1_ensemble
+}
+
+for model, score in sorted(results.items(), key=lambda x: x[1], reverse=True):
+    print(f"{model:20s}: {score:.4f}")
+
+# Сохранение всех необходимых моделей
+print("\n=== Сохранение моделей ===")
+joblib.dump(gb, 'models/model_gb.pkl')
+joblib.dump(rf, 'models/model_rf.pkl')
+joblib.dump(scaler, 'models/scaler.pkl')
+joblib.dump(weights, 'models/ensemble_weights.pkl')
+cb.save_model('models/model_cb.cbm')
+
+print("Модели и веса ансамбля сохранены.")

@@ -213,9 +213,9 @@ def predict():
                 mlconf = 1 - float(prob)
 
             result = {
-                'id': ids[idx],
+                'MLConfidence': mlconf,
                 'MLPredict': bool(int(pred)),
-                'MLConfidence': mlconf
+                'id': ids[idx]
             }
             results.append(result)
 
