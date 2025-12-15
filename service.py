@@ -8,7 +8,6 @@ app = Flask(__name__)
 
 # Загрузка моделей при старте
 print("Загрузка моделей...")
-model_gb = joblib.load('models/model_gb.pkl')
 model_cb = CatBoostClassifier()
 model_cb.load_model('models/model_cb.cbm')
 scaler = joblib.load('models/scaler.pkl')
