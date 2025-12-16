@@ -143,7 +143,7 @@ cb_pool = Pool(X_cb, cat_features=cat_features_idx)
 
 y_pred_cb = cb_model.predict(cb_pool)
 y_proba_cb = cb_model.predict_proba(cb_pool)[:, 1]
-conf_cb = np.maximum(y_proba_cb, 1 - y_proba_cb) * 100.0
+conf_cb = y_proba_cb*100
 
 # CatBoost возвращает (n,1) или строки, приведём к int
 y_pred_cb = np.array(y_pred_cb).astype(int).ravel()
@@ -161,3 +161,4 @@ results = pd.DataFrame({
 
 results.to_csv("data/gitleaks_test_100_results.csv", index=False)
 print("Результаты сохранены в data/gitleaks_test_100_results.csv")
+

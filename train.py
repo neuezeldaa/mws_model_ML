@@ -9,7 +9,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score, roc_auc_score
 import joblib
 from catboost import CatBoostClassifier
-from sklearn.calibration import CalibratedClassifierCV
 
 print("Загрузка подготовленных данных...")
 
@@ -80,16 +79,12 @@ roc_auc_lr = roc_auc_score(y_test, y_proba_lr[:, 1])
 print(f"\nLogReg F1: {f1_lr:.4f}, ROC-AUC: {roc_auc_lr:.4f}")
 
 # ---------- Random Forest ----------
-print("\n--- Random Forest ---")
-rf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1, max_depth=10)
+rf = RandomForestClassifier(
+    n_estimators=100,
+    random_state=42,
+    n_jobs=-1
+)
 rf.fit(X_train, y_train)
-
-# Калибровка
-print("Калибровка вероятностей Random Forest...")
-rf_calibrated = CalibratedClassifierCV(rf, method='isotonic', cv=3)
-rf_calibrated.fit(X_train, y_train)
-
-rf = rf_calibrated
 y_pred_rf_test = rf.predict(X_test)
 y_proba_rf = rf.predict_proba(X_test)
 f1_rf = f1_score(y_test, y_pred_rf_test)
@@ -98,7 +93,6 @@ roc_auc_rf = roc_auc_score(y_test, y_proba_rf[:, 1])
 print(f"\nRandomForest F1: {f1_rf:.4f}, ROC-AUC: {roc_auc_rf:.4f}")
 
 # ---------- Gradient Boosting (sklearn) ----------
-print("\n--- Gradient Boosting ---")
 gb = GradientBoostingClassifier(
     n_estimators=250,
     learning_rate=0.05,
@@ -106,16 +100,8 @@ gb = GradientBoostingClassifier(
     min_samples_split=40,
     min_samples_leaf=20,
     subsample=0.8,
-    random_state=42
 )
 gb.fit(X_train, y_train)
-
-# ДОБАВЬТЕ: Калибровка вероятностей
-print("Калибровка вероятностей Gradient Boosting...")
-gb_calibrated = CalibratedClassifierCV(gb, method='sigmoid', cv=3)
-gb_calibrated.fit(X_train, y_train)
-
-gb = gb_calibrated
 
 y_pred_gb_test = gb.predict(X_test)
 y_proba_gb = gb.predict_proba(X_test)
@@ -212,7 +198,6 @@ results = {
     'RandomForest': f1_rf,
     'GradientBoosting': f1_gb,
     'CatBoost': f1_cb,
-    'Ensemble': f1_ensemble
 }
 
 for model, score in sorted(results.items(), key=lambda x: x[1], reverse=True):
@@ -226,4 +211,3 @@ joblib.dump(scaler, 'models/scaler.pkl')
 joblib.dump(weights, 'models/ensemble_weights.pkl')
 cb.save_model('models/model_cb.cbm')
 
-print("Модели и веса ансамбля сохранены.")

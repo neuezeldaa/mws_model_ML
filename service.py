@@ -203,16 +203,11 @@ def predict():
         probabilities = model_cb.predict_proba(X)[:, 1]
 
 
-
         # Формирование ответа
         results = []
         for idx, (pred, prob) in enumerate(zip(predictions, probabilities)):
-            mlconf = float(prob)
-            if bool(int(pred)) == False:
-                mlconf = 1 - float(prob)
-
             result = {
-                'MLConfidence': mlconf,
+                'MLConfidence': float(prob),
                 'MLPredict': bool(int(pred)),
                 'id': ids[idx]
             }
