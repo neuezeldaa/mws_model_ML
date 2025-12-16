@@ -31,7 +31,7 @@ categorical_features = ['RuleID', 'file_extension']
 # train/test для sklearn‑моделей
 X_train, X_test, y_train, y_test = train_test_split(
     X, y,
-    test_size=0.4,
+    test_size=0.2,
     random_state=42,
     stratify=y
 )
@@ -39,7 +39,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 # train/test для CatBoost
 X_cb_train, X_cb_test, y_cb_train, y_cb_test = train_test_split(
     X_cb, y,
-    test_size=0.4,
+    test_size=0.2,
     random_state=42,
     stratify=y
 )
@@ -48,6 +48,7 @@ cat_features = [
     X_cb_train.columns.get_loc('RuleID'),
     X_cb_train.columns.get_loc('file_extension'),
 ]
+
 
 # ---------- KNN ----------
 scaler = StandardScaler()
