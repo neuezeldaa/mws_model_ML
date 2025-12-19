@@ -4,7 +4,7 @@ import math
 from catboost import CatBoostClassifier, Pool
 
 # 1. Загружаем тестовый датасет
-df = pd.read_csv("data/gitleaks_test_100.csv")
+df = pd.read_csv("data/gitleaks_test_101.csv")
 
 # 2. Целевая переменная
 y_true = (df["IsRealLeak"] == True).astype(int) if df["IsRealLeak"].dtype != int else df["IsRealLeak"]

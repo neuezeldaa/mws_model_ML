@@ -2,16 +2,28 @@ from flask import Flask, request, jsonify
 import pandas as pd
 import joblib
 import math
-from catboost import CatBoostClassifier
+import numpy as np
+from catboost import CatBoostClassifier, Pool
 
 app = Flask(__name__)
 
-# Загрузка моделей при старте
 print("Загрузка моделей...")
 model_cb = CatBoostClassifier()
 model_cb.load_model('models/model_cb.cbm')
-scaler = joblib.load('models/scaler.pkl')
-le_dict = joblib.load('models/le_dict.pkl')
+cat_features_idx = joblib.load('models/cat_features_idx.pkl')
+
+# Загружаем конфигурацию порога
+try:
+    threshold_config = joblib.load('models/threshold.pkl')
+    CLASSIFICATION_THRESHOLD = threshold_config['threshold']
+    print(f"✓ Загружен оптимальный порог: {CLASSIFICATION_THRESHOLD:.3f}")
+    print(f"  Режим: {threshold_config.get('mode', 'unknown')}")
+    print(f"  Precision: {threshold_config.get('precision', 0):.4f}")
+    print(f"  Recall: {threshold_config.get('recall', 0):.4f}")
+    print(f"  F1: {threshold_config.get('f1_score', 0):.4f}")
+except FileNotFoundError:
+    CLASSIFICATION_THRESHOLD = 0.7  # Дефолтный высокий порог для безопасности
+    print(f"⚠ threshold.pkl не найден, используем дефолтный порог: {CLASSIFICATION_THRESHOLD}")
 
 SPECIAL = "!@#$%^&*()-_=+[]{}|;:',.<>?/~`"
 BASE64_ALPH = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
@@ -20,7 +32,6 @@ BASE64_ALPH = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=
 def extract_features_from_json(json_data):
     """Извлекает признаки из упрощенного JSON формата"""
     results = []
-
     for item in json_data:
         row = {
             'RuleID': item.get('rule_id', 'unknown'),
@@ -32,25 +43,16 @@ def extract_features_from_json(json_data):
             'EndColumn': len(str(item.get('value', ''))),
         }
         results.append(row)
-
     return pd.DataFrame(results)
 
 
 def engineer_features(df):
     """Feature engineering для предсказания"""
-    # Длина секрета
     df['secret_length'] = df['Secret'].str.len()
-
-    # Спецсимволы
     df['secret_special_chars'] = df['Secret'].apply(lambda x: sum(1 for c in str(x) if c in SPECIAL))
-
-    # URL
     df['secret_has_url'] = df['Secret'].str.contains('http', case=False, na=False).astype(int)
-
-    # Расширение файла
     df['file_extension'] = df['File'].str.split('.').str[-1]
 
-    # Энтропия
     def shannon_entropy(text):
         s = str(text)
         if not s:
@@ -66,7 +68,6 @@ def engineer_features(df):
 
     df['secret_entropy'] = df['Secret'].apply(shannon_entropy)
 
-    # Статистика символов
     def char_stats(text):
         s = str(text)
         if not s:
@@ -84,7 +85,6 @@ def engineer_features(df):
     df['secret_upper_ratio'] = stats.apply(lambda t: t[2])
     df['secret_special_ratio'] = stats.apply(lambda t: t[3])
 
-    # Base64 ratio
     def base64_ratio(text):
         s = str(text)
         if not s:
@@ -94,7 +94,6 @@ def engineer_features(df):
 
     df['secret_base64_ratio'] = df['Secret'].apply(base64_ratio)
 
-    # Префиксы
     def secret_prefix_flags(text):
         s = str(text)
         s_lower = s.lower()
@@ -107,7 +106,6 @@ def engineer_features(df):
     pref_df = df['Secret'].apply(secret_prefix_flags).apply(pd.Series)
     df = pd.concat([df, pref_df], axis=1)
 
-    # Контекст
     def context_flags(row):
         ctx = f"{row.get('RuleID', '')} {row.get('File', '')}"
         ctx = str(ctx).lower()
@@ -121,104 +119,70 @@ def engineer_features(df):
 
     ctx_df = df.apply(context_flags, axis=1, result_type='expand')
     df = pd.concat([df, ctx_df], axis=1)
-
     return df
 
 
 def prepare_for_prediction(df):
     """Подготовка данных для предсказания"""
-    # Label encoding для категориальных признаков
-    for col in ['RuleID', 'file_extension']:
-        if col in le_dict:
-            le = le_dict[col]
-            # Обработка неизвестных значений
-            df[col] = df[col].apply(lambda x: x if x in le.classes_ else le.classes_[0])
-            df[col] = le.transform(df[col])
-
     numeric_features = [
-        'secret_length',
-        'secret_special_chars',
-        'secret_has_url',
-        'StartLine',
-        'EndLine',
-        'StartColumn',
-        'EndColumn',
-        'secret_entropy',
-        'secret_letter_ratio',
-        'secret_digit_ratio',
-        'secret_upper_ratio',
-        'secret_special_ratio',
-        'secret_base64_ratio',
-        'has_prefix_aws_akid',
-        'has_prefix_github',
-        'has_prefix_slack',
-        'ctx_has_pass',
-        'ctx_has_token',
-        'ctx_has_key',
-        'ctx_has_secret',
-        'ctx_has_example',
+        'secret_length', 'secret_special_chars', 'secret_has_url',
+        'StartLine', 'EndLine', 'StartColumn', 'EndColumn',
+        'secret_entropy', 'secret_letter_ratio', 'secret_digit_ratio',
+        'secret_upper_ratio', 'secret_special_ratio', 'secret_base64_ratio',
+        'has_prefix_aws_akid', 'has_prefix_github', 'has_prefix_slack',
+        'ctx_has_pass', 'ctx_has_token', 'ctx_has_key',
+        'ctx_has_secret', 'ctx_has_example',
     ]
-
     categorical_features = ['RuleID', 'file_extension']
     all_features = numeric_features + categorical_features
-
     return df[all_features]
 
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    """
-    Принимает JSON массив секретов и возвращает предсказания
-    """
+    """Принимает JSON массив секретов и возвращает предсказания"""
     try:
-        # Получаем JSON
         json_data = request.get_json()
-
-        if not json_data:
-            return jsonify({'error': 'No JSON data provided'}), 400
-
-        if not isinstance(json_data, list):
+        if not json_data or not isinstance(json_data, list):
             return jsonify({'error': 'Expected JSON array'}), 400
 
-        # Извлекаем признаки из JSON
         df = extract_features_from_json(json_data)
-
         if df.empty:
-            return jsonify({'error': 'No results found in JSON data'}), 400
+            return jsonify({'error': 'No results found'}), 400
 
-        # Сохраняем исходные данные для ответа
-        original_data = df[['RuleID', 'Secret', 'File']].copy()
-
-        # Сохраняем ID из входных данных
         ids = [item.get('id') for item in json_data]
-
-        # Feature engineering
         df = engineer_features(df)
-
-        # Подготовка для предсказания
         X = prepare_for_prediction(df)
 
-        # Предсказание
-        predictions = model_cb.predict(X)
-        probabilities = model_cb.predict_proba(X)[:, 1]
+        # Предсказание с оптимизированным порогом (≥ 0.5)
+        pool = Pool(X, cat_features=cat_features_idx)
+        probabilities = model_cb.predict_proba(pool)[:, 1]
+        predictions = (probabilities >= CLASSIFICATION_THRESHOLD).astype(int)
 
-
-        # Формирование ответа
         results = []
         for idx, (pred, prob) in enumerate(zip(predictions, probabilities)):
             result = {
-                'MLConfidence': float(prob),
+                'id': ids[idx],
                 'MLPredict': bool(int(pred)),
-                'id': ids[idx]
+                'MLConfidence': float(prob)
             }
             results.append(result)
 
-        return jsonify({
-            'results': results,
-        })
+        return jsonify({'results': results})
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        'status': 'healthy',
+        'model': 'CatBoost',
+        'threshold': float(CLASSIFICATION_THRESHOLD),
+        'mode': 'high_precision'
+    }), 200
 
 
 if __name__ == '__main__':
