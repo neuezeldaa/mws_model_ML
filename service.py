@@ -7,23 +7,12 @@ from catboost import CatBoostClassifier, Pool
 
 app = Flask(__name__)
 
-print("Загрузка моделей...")
 model_cb = CatBoostClassifier()
 model_cb.load_model('models/model_cb.cbm')
 cat_features_idx = joblib.load('models/cat_features_idx.pkl')
 
-# Загружаем конфигурацию порога
-try:
-    threshold_config = joblib.load('models/threshold.pkl')
-    CLASSIFICATION_THRESHOLD = threshold_config['threshold']
-    print(f"✓ Загружен оптимальный порог: {CLASSIFICATION_THRESHOLD:.3f}")
-    print(f"  Режим: {threshold_config.get('mode', 'unknown')}")
-    print(f"  Precision: {threshold_config.get('precision', 0):.4f}")
-    print(f"  Recall: {threshold_config.get('recall', 0):.4f}")
-    print(f"  F1: {threshold_config.get('f1_score', 0):.4f}")
-except FileNotFoundError:
-    CLASSIFICATION_THRESHOLD = 0.7  # Дефолтный высокий порог для безопасности
-    print(f"⚠ threshold.pkl не найден, используем дефолтный порог: {CLASSIFICATION_THRESHOLD}")
+
+CLASSIFICATION_THRESHOLD = 0.85  # Дефолтный высокий порог для безопасности
 
 SPECIAL = "!@#$%^&*()-_=+[]{}|;:',.<>?/~`"
 BASE64_ALPH = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="

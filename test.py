@@ -1,164 +1,549 @@
+import json
 import pandas as pd
-import numpy as np
-import math
-from catboost import CatBoostClassifier, Pool
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    confusion_matrix, classification_report
+)
 
-# 1. Загружаем тестовый датасет
-df = pd.read_csv("data/gitleaks_test_101.csv")
-
-# 2. Целевая переменная
-y_true = (df["IsRealLeak"] == True).astype(int) if df["IsRealLeak"].dtype != int else df["IsRealLeak"]
-
-# ================== ОБРАБОТКА ДАННЫХ ==================
-
-# Базовые признаки
-df["secret_length"] = df["Secret"].str.len()
-
-SPECIAL = "!@#$%^&*()-_=+[]{}|;:',.<>?/~`"
-def count_special_chars(text):
-    return sum(1 for c in str(text) if c in SPECIAL)
-
-df["secret_special_chars"] = df["Secret"].apply(count_special_chars)
-df["secret_has_url"] = df["Secret"].str.contains("http", case=False, na=False).astype(int)
-df["file_extension"] = df["File"].str.split(".").str[-1]
-
-# Энтропия
-def shannon_entropy(text: str) -> float:
-    s = str(text)
-    if not s:
-        return 0.0
-    from collections import Counter
-    counts = Counter(s)
-    total = len(s)
-    ent = 0.0
-    for c in counts.values():
-        p = c / total
-        ent -= p * math.log2(p)
-    return ent
-
-df["secret_entropy"] = df["Secret"].apply(shannon_entropy)
-
-# Доли типов символов
-def char_stats(text: str):
-    s = str(text)
-    if not s:
-        return 0, 0, 0, 0
-    letters = sum(c.isalpha() for c in s)
-    digits = sum(c.isdigit() for c in s)
-    uppers = sum(c.isupper() for c in s)
-    specials = sum(c in SPECIAL for c in s)
-    n = len(s)
-    return (
-        letters / n,
-        digits / n,
-        uppers / n,
-        specials / n,
-    )
-
-stats = df["Secret"].apply(char_stats)
-df["secret_letter_ratio"] = stats.apply(lambda t: t[0])
-df["secret_digit_ratio"] = stats.apply(lambda t: t[1])
-df["secret_upper_ratio"] = stats.apply(lambda t: t[2])
-df["secret_special_ratio"] = stats.apply(lambda t: t[3])
-
-# Base64‑подобность
-BASE64_ALPH = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
-def base64_ratio(text: str) -> float:
-    s = str(text)
-    if not s:
-        return 0.0
-    cnt = sum(c in BASE64_ALPH for c in s)
-    return cnt / len(s)
-
-df["secret_base64_ratio"] = df["Secret"].apply(base64_ratio)
-
-# Префиксы
-def secret_prefix_flags(text: str):
-    s = str(text)
-    s_lower = s.lower()
-    return {
-        "has_prefix_aws_akid": int(s.startswith("AKIA") or s.startswith("ASIA")),
-        "has_prefix_github":   int(s.startswith("ghp_") or s.startswith("gho_") or s.startswith("ghs_")),
-        "has_prefix_slack":    int(s_lower.startswith("xoxb-") or s_lower.startswith("xoxp-")),
+api_response_text = """
+{
+   "results": [
+    {
+      "MLConfidence": 0.19345142914878619,
+      "MLPredict": false,
+      "id": 1
+    },
+    {
+      "MLConfidence": 0.5497978568689518,
+      "MLPredict": false,
+      "id": 2
+    },
+    {
+      "MLConfidence": 0.041474879823256296,
+      "MLPredict": false,
+      "id": 3
+    },
+    {
+      "MLConfidence": 0.07088916641407444,
+      "MLPredict": false,
+      "id": 4
+    },
+    {
+      "MLConfidence": 0.7600104313245634,
+      "MLPredict": false,
+      "id": 5
+    },
+    {
+      "MLConfidence": 0.04660178528920643,
+      "MLPredict": false,
+      "id": 6
+    },
+    {
+      "MLConfidence": 0.1480200873071504,
+      "MLPredict": false,
+      "id": 7
+    },
+    {
+      "MLConfidence": 0.16071772166347895,
+      "MLPredict": false,
+      "id": 8
+    },
+    {
+      "MLConfidence": 0.19618958010890641,
+      "MLPredict": false,
+      "id": 9
+    },
+    {
+      "MLConfidence": 0.9405075211788374,
+      "MLPredict": true,
+      "id": 10
+    },
+    {
+      "MLConfidence": 0.7138773048286685,
+      "MLPredict": false,
+      "id": 11
+    },
+    {
+      "MLConfidence": 0.025001009577521858,
+      "MLPredict": false,
+      "id": 12
+    },
+    {
+      "MLConfidence": 0.8578895609827306,
+      "MLPredict": false,
+      "id": 13
+    },
+    {
+      "MLConfidence": 0.16071772166347895,
+      "MLPredict": false,
+      "id": 14
+    },
+    {
+      "MLConfidence": 0.027608408957490966,
+      "MLPredict": false,
+      "id": 15
+    },
+    {
+      "MLConfidence": 0.05501364403916014,
+      "MLPredict": false,
+      "id": 16
+    },
+    {
+      "MLConfidence": 0.7419340459707889,
+      "MLPredict": false,
+      "id": 17
+    },
+    {
+      "MLConfidence": 0.04123648686080465,
+      "MLPredict": false,
+      "id": 18
+    },
+    {
+      "MLConfidence": 0.05587079867467658,
+      "MLPredict": false,
+      "id": 19
+    },
+    {
+      "MLConfidence": 0.1578192856326435,
+      "MLPredict": false,
+      "id": 20
+    },
+    {
+      "MLConfidence": 0.04042828581764348,
+      "MLPredict": false,
+      "id": 21
+    },
+    {
+      "MLConfidence": 0.028491663944154057,
+      "MLPredict": false,
+      "id": 22
+    },
+    {
+      "MLConfidence": 0.8578895609827306,
+      "MLPredict": false,
+      "id": 23
+    },
+    {
+      "MLConfidence": 0.02360975741112603,
+      "MLPredict": false,
+      "id": 24
+    },
+    {
+      "MLConfidence": 0.40513179297245744,
+      "MLPredict": false,
+      "id": 25
+    },
+    {
+      "MLConfidence": 0.8748429094136481,
+      "MLPredict": false,
+      "id": 26
+    },
+    {
+      "MLConfidence": 0.028491663944154057,
+      "MLPredict": false,
+      "id": 27
+    },
+    {
+      "MLConfidence": 0.12039175150384292,
+      "MLPredict": false,
+      "id": 28
+    },
+    {
+      "MLConfidence": 0.07693910452093844,
+      "MLPredict": false,
+      "id": 29
+    },
+    {
+      "MLConfidence": 0.8627948027419415,
+      "MLPredict": false,
+      "id": 30
+    },
+    {
+      "MLConfidence": 0.11987902153773304,
+      "MLPredict": false,
+      "id": 31
+    },
+    {
+      "MLConfidence": 0.06105745742154869,
+      "MLPredict": false,
+      "id": 32
+    },
+    {
+      "MLConfidence": 0.05429963786064143,
+      "MLPredict": false,
+      "id": 33
+    },
+    {
+      "MLConfidence": 0.13154955544325792,
+      "MLPredict": false,
+      "id": 34
+    },
+    {
+      "MLConfidence": 0.812659960712061,
+      "MLPredict": false,
+      "id": 35
+    },
+    {
+      "MLConfidence": 0.041474879823256296,
+      "MLPredict": false,
+      "id": 36
+    },
+    {
+      "MLConfidence": 0.8182016554443043,
+      "MLPredict": false,
+      "id": 37
+    },
+    {
+      "MLConfidence": 0.7419340459707889,
+      "MLPredict": false,
+      "id": 38
+    },
+    {
+      "MLConfidence": 0.041474879823256296,
+      "MLPredict": false,
+      "id": 39
+    },
+    {
+      "MLConfidence": 0.22490482018152025,
+      "MLPredict": false,
+      "id": 40
+    },
+    {
+      "MLConfidence": 0.033571775262841275,
+      "MLPredict": false,
+      "id": 41
+    },
+    {
+      "MLConfidence": 0.5296034030268495,
+      "MLPredict": false,
+      "id": 42
+    },
+    {
+      "MLConfidence": 0.05916884299219391,
+      "MLPredict": false,
+      "id": 43
+    },
+    {
+      "MLConfidence": 0.8537854737967748,
+      "MLPredict": false,
+      "id": 44
+    },
+    {
+      "MLConfidence": 0.148455065738022,
+      "MLPredict": false,
+      "id": 45
+    },
+    {
+      "MLConfidence": 0.03647052827093467,
+      "MLPredict": false,
+      "id": 46
+    },
+    {
+      "MLConfidence": 0.8277955464218193,
+      "MLPredict": false,
+      "id": 47
+    },
+    {
+      "MLConfidence": 0.8923162882032283,
+      "MLPredict": false,
+      "id": 48
+    },
+    {
+      "MLConfidence": 0.041474879823256296,
+      "MLPredict": false,
+      "id": 49
+    },
+    {
+      "MLConfidence": 0.05255881068672515,
+      "MLPredict": false,
+      "id": 50
+    },
+    {
+      "MLConfidence": 0.05587079867467658,
+      "MLPredict": false,
+      "id": 51
+    },
+    {
+      "MLConfidence": 0.028491663944154057,
+      "MLPredict": false,
+      "id": 52
+    },
+    {
+      "MLConfidence": 0.7419340459707889,
+      "MLPredict": false,
+      "id": 53
+    },
+    {
+      "MLConfidence": 0.40513179297245744,
+      "MLPredict": false,
+      "id": 54
+    },
+    {
+      "MLConfidence": 0.07816831237022577,
+      "MLPredict": false,
+      "id": 55
+    },
+    {
+      "MLConfidence": 0.6849073952011544,
+      "MLPredict": false,
+      "id": 56
+    },
+    {
+      "MLConfidence": 0.03266631194889295,
+      "MLPredict": false,
+      "id": 57
+    },
+    {
+      "MLConfidence": 0.8520810422720936,
+      "MLPredict": false,
+      "id": 58
+    },
+    {
+      "MLConfidence": 0.9109227776949765,
+      "MLPredict": true,
+      "id": 59
+    },
+    {
+      "MLConfidence": 0.08247158450874978,
+      "MLPredict": false,
+      "id": 60
+    },
+    {
+      "MLConfidence": 0.025001009577521858,
+      "MLPredict": false,
+      "id": 61
+    },
+    {
+      "MLConfidence": 0.7138773048286685,
+      "MLPredict": false,
+      "id": 62
+    },
+    {
+      "MLConfidence": 0.027608408957490966,
+      "MLPredict": false,
+      "id": 63
+    },
+    {
+      "MLConfidence": 0.8748429094136481,
+      "MLPredict": false,
+      "id": 64
+    },
+    {
+      "MLConfidence": 0.03291799040930094,
+      "MLPredict": false,
+      "id": 65
+    },
+    {
+      "MLConfidence": 0.04123648686080465,
+      "MLPredict": false,
+      "id": 66
+    },
+    {
+      "MLConfidence": 0.8748429094136481,
+      "MLPredict": false,
+      "id": 67
+    },
+    {
+      "MLConfidence": 0.02360975741112603,
+      "MLPredict": false,
+      "id": 68
+    },
+    {
+      "MLConfidence": 0.9405075211788374,
+      "MLPredict": true,
+      "id": 69
+    },
+    {
+      "MLConfidence": 0.04313739779458486,
+      "MLPredict": false,
+      "id": 70
+    },
+    {
+      "MLConfidence": 0.027608408957490966,
+      "MLPredict": false,
+      "id": 71
+    },
+    {
+      "MLConfidence": 0.9252483896003205,
+      "MLPredict": true,
+      "id": 72
+    },
+    {
+      "MLConfidence": 0.35050987299911923,
+      "MLPredict": false,
+      "id": 73
+    },
+    {
+      "MLConfidence": 0.40513179297245744,
+      "MLPredict": false,
+      "id": 74
+    },
+    {
+      "MLConfidence": 0.7600104313245634,
+      "MLPredict": false,
+      "id": 75
+    },
+    {
+      "MLConfidence": 0.06194303704953786,
+      "MLPredict": false,
+      "id": 76
+    },
+    {
+      "MLConfidence": 0.35050987299911923,
+      "MLPredict": false,
+      "id": 77
+    },
+    {
+      "MLConfidence": 0.06194303704953786,
+      "MLPredict": false,
+      "id": 78
+    },
+    {
+      "MLConfidence": 0.05429963786064143,
+      "MLPredict": false,
+      "id": 79
+    },
+    {
+      "MLConfidence": 0.028491663944154057,
+      "MLPredict": false,
+      "id": 80
+    },
+    {
+      "MLConfidence": 0.40513179297245744,
+      "MLPredict": false,
+      "id": 81
+    },
+    {
+      "MLConfidence": 0.03647052827093467,
+      "MLPredict": false,
+      "id": 82
+    },
+    {
+      "MLConfidence": 0.8584839752231718,
+      "MLPredict": false,
+      "id": 83
+    },
+    {
+      "MLConfidence": 0.8452299582519573,
+      "MLPredict": false,
+      "id": 84
+    },
+    {
+      "MLConfidence": 0.35050987299911923,
+      "MLPredict": false,
+      "id": 85
+    },
+    {
+      "MLConfidence": 0.917636649926597,
+      "MLPredict": true,
+      "id": 86
+    },
+    {
+      "MLConfidence": 0.7419340459707889,
+      "MLPredict": false,
+      "id": 87
+    },
+    {
+      "MLConfidence": 0.03291799040930094,
+      "MLPredict": false,
+      "id": 88
+    },
+    {
+      "MLConfidence": 0.5936190044997027,
+      "MLPredict": false,
+      "id": 89
+    },
+    {
+      "MLConfidence": 0.22490482018152025,
+      "MLPredict": false,
+      "id": 90
+    },
+    {
+      "MLConfidence": 0.9112092252279048,
+      "MLPredict": true,
+      "id": 91
+    },
+    {
+      "MLConfidence": 0.04814837642900727,
+      "MLPredict": false,
+      "id": 92
+    },
+    {
+      "MLConfidence": 0.5988404634494005,
+      "MLPredict": false,
+      "id": 93
+    },
+    {
+      "MLConfidence": 0.029226334198264196,
+      "MLPredict": false,
+      "id": 94
+    },
+    {
+      "MLConfidence": 0.09716564318077472,
+      "MLPredict": false,
+      "id": 95
+    },
+    {
+      "MLConfidence": 0.11987902153773304,
+      "MLPredict": false,
+      "id": 96
+    },
+    {
+      "MLConfidence": 0.04931032637462592,
+      "MLPredict": false,
+      "id": 97
+    },
+    {
+      "MLConfidence": 0.03266631194889295,
+      "MLPredict": false,
+      "id": 98
+    },
+    {
+      "MLConfidence": 0.9252483896003205,
+      "MLPredict": true,
+      "id": 99
+    },
+    {
+      "MLConfidence": 0.8584839752231718,
+      "MLPredict": false,
+      "id": 100
     }
+  ]
 
-pref_df = df["Secret"].apply(secret_prefix_flags).apply(pd.Series)
-df = pd.concat([df, pref_df], axis=1)
+}
+"""
 
-# Контекст (RuleID + File)
-def context_flags(row):
-    ctx = f"{row.get('RuleID', '')} {row.get('File', '')}"
-    ctx = str(ctx).lower()
-    return {
-        "ctx_has_pass":    int(any(k in ctx for k in ["pass", "pwd"])),
-        "ctx_has_token":   int("token" in ctx),
-        "ctx_has_key":     int("key" in ctx),
-        "ctx_has_secret":  int("secret" in ctx),
-        "ctx_has_example": int("example" in ctx or "sample" in ctx or "test" in ctx),
-    }
+api_data = json.loads(api_response_text)
+df_pred = pd.DataFrame(api_data['results'])
 
-ctx_df = df.apply(context_flags, axis=1, result_type="expand")
-df = pd.concat([df, ctx_df], axis=1)
+# Загружаем истинные метки
+df_true = pd.read_csv('data/gitleaks_test_100.csv')
 
-numeric_features = [
-    "secret_length",
-    "secret_special_chars",
-    "secret_has_url",
-    "StartLine",
-    "EndLine",
-    "StartColumn",
-    "EndColumn",
-    "secret_entropy",
-    "secret_letter_ratio",
-    "secret_digit_ratio",
-    "secret_upper_ratio",
-    "secret_special_ratio",
-    "secret_base64_ratio",
-    "has_prefix_aws_akid",
-    "has_prefix_github",
-    "has_prefix_slack",
-    "ctx_has_pass",
-    "ctx_has_token",
-    "ctx_has_key",
-    "ctx_has_secret",
-    "ctx_has_example",
-]
-categorical_features = ["RuleID", "file_extension"]
-all_features = numeric_features + categorical_features
+# Объединяем по ID
+df = df_true.merge(df_pred, left_on='ID', right_on='id')
 
+# Извлекаем истинные и предсказанные значения
+y_true = df['IsRealLeak'].astype(bool)
+y_pred = df['MLPredict'].astype(bool)
 
-# ================== МОДЕЛЬ CatBoost ==================
+# Вычисляем метрики
+accuracy = accuracy_score(y_true, y_pred)
+precision = precision_score(y_true, y_pred, zero_division=0)
+recall = recall_score(y_true, y_pred, zero_division=0)
+f1 = f1_score(y_true, y_pred, zero_division=0)
 
-cb_model = CatBoostClassifier()
-cb_model.load_model("models/model_cb.cbm")
+print(f"Accuracy:  {accuracy:.4f} ({accuracy*100:.2f}%)")
+print(f"Precision: {precision:.4f} ({precision*100:.2f}%)")
+print(f"Recall:    {recall:.4f} ({recall*100:.2f}%)")
+print(f"F1-Score:  {f1:.4f}")
 
-X_cb = df[all_features]
+# Confusion Matrix
+cm = confusion_matrix(y_true, y_pred)
+tn, fp, fn, tp = cm.ravel()
+print(f"\nTrue Positives:  {tp}")
+print(f"True Negatives:  {tn}")
+print(f"False Positives: {fp}")
+print(f"False Negatives: {fn}")
 
-cat_features_idx = [
-    X_cb.columns.get_loc("RuleID"),
-    X_cb.columns.get_loc("file_extension"),
-]
-
-cb_pool = Pool(X_cb, cat_features=cat_features_idx)
-
-y_pred_cb = cb_model.predict(cb_pool)
-y_proba_cb = cb_model.predict_proba(cb_pool)[:, 1]
-conf_cb = y_proba_cb*100
-
-# CatBoost возвращает (n,1) или строки, приведём к int
-y_pred_cb = np.array(y_pred_cb).astype(int).ravel()
-
-# ================== СОХРАНЕНИЕ РЕЗУЛЬТАТОВ ==================
-
-results = pd.DataFrame({
-    "Secret": df["Secret"],
-    "RuleID": df["RuleID"],
-    "File": df["File"],
-    "IsRealLeak_true": y_true,
-    "CB_PredictedIsRealLeak": y_pred_cb,
-    "CB_Confidence": conf_cb,
-})
-
-results.to_csv("data/gitleaks_test_100_results.csv", index=False)
-print("Результаты сохранены в data/gitleaks_test_100_results.csv")
-
+# Детальный отчёт
+print(classification_report(y_true, y_pred, target_names=['Fake', 'Real Leak']))
