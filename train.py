@@ -10,8 +10,6 @@ from sklearn.metrics import f1_score, roc_auc_score
 import joblib
 from catboost import CatBoostClassifier
 
-print("Загрузка подготовленных данных...")
-
 X = pd.read_csv('data/gitleaks_dataset_sklearn_X.csv')
 y = pd.read_csv('data/gitleaks_dataset_y.csv').iloc[:, 0]
 
@@ -112,7 +110,7 @@ roc_auc_gb = roc_auc_score(y_test, y_proba_gb[:, 1])
 print(f"\nGradientBoosting F1: {f1_gb:.4f}, ROC-AUC: {roc_auc_gb:.4f}")
 
 # ---------- CatBoost ----------
-print("\nОбучение CatBoost...")
+print("\nОбучение CatBoost")
 
 n_negative = (y_cb_train == 0).sum()
 n_positive = (y_cb_train == 1).sum()
@@ -155,7 +153,6 @@ print(f"RandomForest:     {f1_rf:.4f}")
 print(f"GradientBoosting: {f1_gb:.4f}")
 print(f"CatBoost:         {f1_cb:.4f}")
 
-# Сохранение лучших моделей/скейлера
 joblib.dump(gb, 'models/model_gb.pkl')
 joblib.dump(scaler, 'models/scaler.pkl')
 cb.save_model('models/model_cb.cbm')
@@ -163,36 +160,8 @@ cb.save_model('models/model_cb.cbm')
 print("\nМодели сохранены.")
 
 
-print("\n=== Создание ансамбля ===")
-
-# Предсказания всех моделей на тестовой выборке
-models_predictions = {
-    'gb': y_proba_gb[:, 1],
-    'cb': y_proba_cb,
-    'rf': y_proba_rf[:, 1],
-}
-
-# Простое взвешенное ансамблирование (можно оптимизировать)
-weights = {
-    'cb': 0.5,    # CatBoost - лучшая модель
-    'gb': 0.3,    # Gradient Boosting
-    'rf': 0.2,    # Random Forest
-}
-
-ensemble_proba = (
-    weights['cb'] * models_predictions['cb'] +
-    weights['gb'] * models_predictions['gb'] +
-    weights['rf'] * models_predictions['rf']
-)
-
-ensemble_pred = (ensemble_proba >= 0.5).astype(int)
-f1_ensemble = f1_score(y_test, ensemble_pred)
-roc_auc_ensemble = roc_auc_score(y_test, ensemble_proba)
-
-print(f"\nEnsemble F1: {f1_ensemble:.4f}, ROC-AUC: {roc_auc_ensemble:.4f}")
-
 # Сравнение результатов
-print("\n=== Итоговое сравнение ===")
+print("\nИтоговое сравнение")
 results = {
     'KNN': f1_knn,
     'LogReg': f1_lr,
@@ -204,8 +173,7 @@ results = {
 for model, score in sorted(results.items(), key=lambda x: x[1], reverse=True):
     print(f"{model:20s}: {score:.4f}")
 
-# Сохранение всех необходимых моделей
-print("\n=== Сохранение моделей ===")
+print("\nСохранение моделей")
 joblib.dump(gb, 'models/model_gb.pkl')
 joblib.dump(rf, 'models/model_rf.pkl')
 joblib.dump(scaler, 'models/scaler.pkl')
