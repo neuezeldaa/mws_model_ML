@@ -4,7 +4,7 @@ from sklearn.preprocessing import LabelEncoder
 import joblib
 import math
 
-print("Очистка и подготовка данных...")
+print("Очистка и подготовка данных")
 
 data = pd.read_csv('data/gitleaks_detection_dataset.csv')
 
@@ -69,7 +69,7 @@ data_filtered['secret_digit_ratio'] = stats.apply(lambda t: t[1])
 data_filtered['secret_upper_ratio'] = stats.apply(lambda t: t[2])
 data_filtered['secret_special_ratio'] = stats.apply(lambda t: t[3])
 
-# Base64‑подобность (доля символов из алфавита base64)
+# Base64‑подобность
 BASE64_ALPH = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
 def base64_ratio(text: str) -> float:
     s = str(text)
@@ -80,7 +80,7 @@ def base64_ratio(text: str) -> float:
 
 data_filtered['secret_base64_ratio'] = data_filtered['Secret'].apply(base64_ratio)
 
-# Префиксы распространённых секретов (AWS, GitHub, Slack и т.п.)
+# Префиксы распространённых секретов (AWS, GitHub и т.д.)
 def secret_prefix_flags(text: str):
     s = str(text)
     s_lower = s.lower()
